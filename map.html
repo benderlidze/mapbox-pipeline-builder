@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Petro Ninja Pipeline Builder</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link rel="stylesheet" href="https://uicdn.toast.com/tui.pagination/latest/tui-pagination.css" />
+    <script src="https://uicdn.toast.com/tui.pagination/latest/tui-pagination.js"></script>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+
+    <script src="js/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.1.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.1.0/mapbox-gl.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.3.0/turf.min.js"></script>
+
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css" />
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" />
+
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.2.0/mapbox-gl-draw.js"></script>
+    <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.2.0/mapbox-gl-draw.css"
+        type="text/css" />
+
+    <script src="js/shortcut.js"></script>
+    <link rel="stylesheet" href="css/main.css" />
+</head>
+
+<body class="container">
+    <!-- The Modal -->
+    <div id="myModal" class="modal">
+        <!-- Modal content -->
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close">&times;</span>
+                <h2>Action required</h2>
+            </div>
+            <div class="modal-body">
+                <div><input type="text" id="score" placeholder="Score" /></div>
+                <div><input type="text" id="note" placeholder="Note" /></div>
+            </div>
+            <div class="modal-footer">
+                <button id="save" class="button blue">Save</button>
+                <button id="cancel" class="button blue">Cancel</button>
+
+                <div class="dropdown">
+                    <button id="saveas" class="button blue dropdown">Save as</button>
+                    <div class="dropdown-content" id="savelist">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="left">
+        <nav id="menu">
+            <a href="#" id="clearLineFilter" class="active">Clear filters</a>
+        </nav>
+        <div id="lineinfo"></div>
+        <div id="map"></div>
+    </div>
+    <div class="right">
+        <div id="allpipes"></div>
+        <div id="">
+            <select id="groups"></select>
+            <select id="projects" style="display: none"></select>
+        </div>
+        <div style="display: flex">
+            <div>
+                <label class="switch">
+                    <input type="checkbox" id="incomplete" />
+                    <div class="slider round"></div>
+                </label>
+            </div>
+            <div style="position: relative; right: -155px">
+                <label class="switch">
+                    <input type="checkbox" id="corridors" />
+                    <div class="slider second-slider round"></div>
+                </label>
+            </div>
+        </div>
+        <div>
+            <input type="search" id="inputFilter" placeholder="filter" />
+        </div>
+        <div id="paginator">
+            <div id="pagination1" class="tui-pagination"></div>
+        </div>
+        <div id="list"></div>
+
+        <div style="text-align: center">
+            <button id="next" class="button">Next project &rarr;</button>
+        </div>
+    </div>
+</body>
+
+<script>
+    //const apiUrl = "https://petro-ninja-pipeline-builder.herokuapp.com/api/api_v2.php";
+    const apiUrl = 'http://serg.one/mapbox-pipeline/api/api_v2.php';
+    var pressedKeys = {};
+    window.onkeyup = function (e) {
+        pressedKeys[e.keyCode] = false;
+    };
+    window.onkeydown = function (e) {
+        pressedKeys[e.keyCode] = true;
+    };
+
+    const filters = {
+        number: 0,
+        segment: 0,
+        project: 0,
+    };
+
+    const currentPage = [];
+
+    let listJson = {};
+    let arrayData = [];
+    let pagination;
+    let allPipes = [];
+
+    const options = {
+        totalItems: 0,
+        itemsPerPage: 50,
+        visiblePages: 5,
+        centerAlign: true,
+    };
+    const allpipesDiv = document.getElementById("allpipes");
+    const nextProjectButton = document.getElementById("next");
+    const groupsInput = document.getElementById("groups");
+    const projectsInput = document.getElementById("projects");
+    const lineinfo = document.getElementById("lineinfo");
+    const clearLineFilter = document.getElementById("clearLineFilter");
+    const list = document.getElementById("list");
+    const inputFilter = document.getElementById("inputFilter");
+    const incompleteFilter = document.getElementById("incomplete");
+    const corridorsFilter = document.getElementById("corridors");
+
+    mapboxgl.accessToken =
+        "pk.eyJ1Ijoic2JpbHN0b24iLCJhIjoiY2trcHpweW80MDRwcTJ3cnZ2bXZmejA2bSJ9.vf8ohNEOskgF0ERmQ4Y1kQ";
+    var map = new mapboxgl.Map({
+        container: "map",
+        style: "mapbox://styles/sbilston/ckky3y0y20uev17nzhmcafr8p",
+        center: { lng: -126.0546135006228, lat: 55.0372830480068 },
+        zoom: 5.36,
+    });
+
+    map.dragRotate.disable();
+
+    //===============================CUSTOM DRAW MODE===========================
+    //===============================CUSTOM DRAW MODE===========================
+    //===============================CUSTOM DRAW MODE===========================
+    // const tooltip = new mapboxgl.Popup({
+    //     closeButton: true,
+    //     closeOnClick: false,
+    //     offset: [0, -10]
+    // });
+    function createVertex(parentId, coordinates, path, selected) {
+        return {
+            type: "Feature",
+            properties: {
+                meta: "vertex",
+                parent: parentId,
+                coord_path: path,
+                active: selected ? true : false,
+            },
+            geometry: {
+                type: "Point",
+                coordinates: coordinates,
+            },
+        };
+    }
+
+
+
+    MapboxDraw.modes.direct_select.onDrag = function (state, e) {
+        if (state.canDragMove !== true) return;
+        state.dragMoving = true;
+        e.originalEvent.stopPropagation();
+        const delta = {
+            lng: e.lngLat.lng - state.dragMoveLocation.lng,
+            lat: e.lngLat.lat - state.dragMoveLocation.lat,
+        };
+        if (state.selectedCoordPaths.length > 0) this.dragVertex(state, e, delta);
+        else this.dragFeature(state, e, delta);
+        state.dragMoveLocation = e.lngLat;
+
+        // console.log('state.feature', state.feature);
+        if (state.feature.type === "LineString") {
+            const length = turf.length(state.feature, { units: "meters" }).toFixed(3);
+            if (lineinfo) {
+                lineinfo.style.display = "inline";
+                lineinfo.innerHTML = `Total distance ${length}m`;
+            }
+        }
+    };
+
+    function isEventAtCoordinates(event, coordinates) {
+        if (!event.lngLat) return false;
+        return event.lngLat.lng === coordinates[0] && event.lngLat.lat === coordinates[1];
+    }
+
+
+    MapboxDraw.modes.draw_line_string.clickAnywhere = function (state, e) {
+        if (e.originalEvent.shiftKey) {
+            const line = state.line.coordinates;
+            const lastClick = line[line.length - 1]
+            const a = map.project(lastClick)
+            const res = line.map((i, index) => {
+                const b = map.project(i)
+                const d = distance(a, b)
+                return {
+                    index,
+                    distance: d
+                };
+            }).find(i => i.distance < 8 && i.distance > 0)
+            if (res) {
+                state.line.removeCoordinate(res.index)
+                state.currentVertexPosition = state.currentVertexPosition - 1
+            }
+
+        } else {
+            if (state.currentVertexPosition > 0 && isEventAtCoordinates(e, state.line.coordinates[state.currentVertexPosition - 1]) ||
+                state.direction === 'backwards' && isEventAtCoordinates(e, state.line.coordinates[state.currentVertexPosition + 1])) {
+                return this.changeMode('simple_select', { featureIds: [state.line.id] });
+            }
+            this.updateUIClasses({ mouse: 'add' });
+            state.line.updateCoordinate(state.currentVertexPosition, e.lngLat.lng, e.lngLat.lat);
+            if (state.direction === 'forward') {
+                state.currentVertexPosition++;
+                state.line.updateCoordinate(state.currentVertexPosition, e.lngLat.lng, e.lngLat.lat);
+            } else {
+                state.line.addCoordinate(0, e.lngLat.lng, e.lngLat.lat);
+            }
+        }
+
+    };
+
+    function distance(a, b) {
+        var dist = Math.sqrt(Math.pow((a.x - b.x), 2) + Math.pow((a.y - b.y), 2));
+        return dist;
+    }
+
+    MapboxDraw.modes.draw_line_string.clickOnVertex = function (state, event) {
+
+        if (event.originalEvent.button === 2) return; //it is right click, do not delete points
+
+        const line = state.line.coordinates;
+        const lastClick = line[line.length - 1]
+        const a = map.project(lastClick)
+        const res = line.map((i, index) => {
+            const b = map.project(i)
+            const d = distance(a, b)
+            return {
+                index,
+                distance: d
+            };
+        }).find(i => i.distance < 8 && i.distance > 0)
+        if (res) {
+            state.line.removeCoordinate(res.index)
+            state.currentVertexPosition = state.currentVertexPosition - 1
+        }
+        //return this.changeMode('simple_select', { featureIds: [state.line.id] });
+    };
+
+    MapboxDraw.modes.draw_line_string.toDisplayFeatures = function (state, geojson, display) {
+        const isActiveLine = geojson.properties.id === state.line.id;
+        geojson.properties.active = isActiveLine ? "true" : "false";
+        if (!isActiveLine) return display(geojson);
+
+        // Only render the line if it has at least one real coordinate
+        if (geojson.geometry.coordinates.length < 2) return;
+        geojson.properties.meta = "feature";
+        const vertex = createVertex(
+            state.line.id,
+            geojson.geometry.coordinates[
+            state.direction === "forward" ? geojson.geometry.coordinates.length - 2 : 1
+            ],
+            `${state.direction === "forward" ? geojson.geometry.coordinates.length - 2 : 1}`,
+            false
+        );
+        const point = geojson.geometry.coordinates[geojson.geometry.coordinates.length - 1];
+        const length = turf.length(geojson, { units: "meters" }).toFixed(3);
+
+        if (lineinfo) {
+            let expectedDistance = currentPipeline ? currentPipeline.expectedLength + "m" : "???";
+            lineinfo.style.display = "inline";
+            lineinfo.innerHTML = `Total distance: ${length}m / ${expectedDistance}`;
+        }
+
+        //show all points on the line
+        const temp = [...geojson.geometry.coordinates]
+        temp.splice(-1, 1)
+        temp.map((i, index) => {
+            const g = {
+                type: "Feature",
+                properties: {
+                    meta: "vertex",
+                    parent: state.line.id,
+                },
+                geometry: {
+                    type: "Point",
+                    coordinates: i,
+                }
+            }
+            display(g)
+        })
+
+        //display(vertex);
+        display(geojson);
+    };
+
+    //===============================CUSTOM DRAW MODE===========================
+    //===============================CUSTOM DRAW MODE===========================
+    //===============================CUSTOM DRAW MODE===========================
+
+    var Draw = new MapboxDraw({
+        displayControlsDefault: false,
+        controls: {
+            line_string: true,
+            trash: true,
+        },
+    });
+
+    map.addControl(Draw, "top-right");
+
+    map.on("load", function () {
+
+
+        fetch("data/pipeline_geometry.xlsx")
+            .then(function (res) {
+                if (!res.ok) throw new Error("fetch failed");
+                return res.arrayBuffer();
+            })
+            .then(function (ab) {
+                var data = new Uint8Array(ab);
+                var wb = XLSX.read(data, { type: "array" });
+
+                var first_sheet_name = wb.SheetNames[0];
+                var worksheet = wb.Sheets[first_sheet_name];
+                arrayData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
+
+                d3.csv("data/New Attribute Table - 3.csv").then((CSV) => {
+                    console.log("CSV", CSV);
+                    arrayData.forEach((A) => {
+                        const n = +A["Project #"];
+                        const s = +A["Segment #"];
+                        const gr = CSV.find((d) => +d["Project #"] === n && +d["Segment #"] === s);
+                        if (gr) {
+                            A.info = { ...gr };
+                        }
+                    });
+
+                    console.log("arrayData (init)", arrayData);
+                    /************************ End of conversion ************************/
+                    pagination = new tui.Pagination(document.getElementById("pagination1"), options);
+                    pagination.setTotalItems(arrayData.length);
+                    pagination.reset();
+                    pagination.on("afterMove", ({ page }) => {
+                        printPage(
+                            (page - 1) * options.itemsPerPage,
+                            (page - 1) * options.itemsPerPage + options.itemsPerPage,
+                            filterData()
+                        );
+                    });
+                    printPage(0, options.itemsPerPage, arrayData);
+                });
+
+                //query all pipes from db to color code the pipes
+                shp("data/Pipeline_Rights_of_Way_(Permitted).zip").then(function (geojson) {
+                    listJson = { ...geojson };
+                    calcColors().then((jsonColors) => {
+                        // //update main array with groups from DB
+                        // arrayData.forEach(i => {
+                        //     const n = +i['Project #'];
+                        //     const s = +i['Segment #'];
+                        //     const gr = allPipes.find(d => +d.number === n && +d.segment === s);
+                        //     if (gr && gr.group) {
+                        //         i.group = gr.group
+                        //     } else {
+                        //         i.group = 'empty';
+                        //     }
+                        //     if (gr) {
+                        //         i.completed = gr.completed
+                        //         i.geometry = gr.geometry
+                        //     }
+                        // })
+                    });
+                });
+            });
+
+        //START===========isTiledInMapox=======================
+
+        getIsTiledInMapbox();
+
+
+        map.addSource("isTiledInMapox", {
+            type: "geojson",
+            data: {
+                type: "FeatureCollection",
+                features: [],
+            },
+        });
+        map.addLayer({
+            id: "isTiledInMapox",
+            type: "line",
+            source: "isTiledInMapox",
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+            paint: {
+                "line-color": "black",
+                "line-width": 3,
+            },
+        });
+        //END===========isTiledInMapox=======================
+
+        map.addSource("squares", {
+            type: "geojson",
+            data: {
+                type: "FeatureCollection",
+                features: [],
+            },
+        });
+
+        map.addLayer({
+            id: "squares",
+            type: "line",
+            source: "squares",
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+            paint: {
+                "line-color": "red",
+                "line-width": 1,
+            },
+        });
+
+        //when group and project selected - display current project geometry
+        map.addSource("projectGeometry", {
+            type: "geojson",
+            data: {
+                type: "FeatureCollection",
+                features: [],
+            },
+        });
+        map.addLayer(
+            {
+                id: "projectGeometry",
+                type: "line",
+                source: "projectGeometry",
+                layout: {
+                    "line-join": "round",
+                    "line-cap": "round",
+                },
+                paint: {
+                    "line-color": "red",
+                    "line-width": 5,
+                    "line-opacity": 0.3,
+                },
+            },
+            "gl-draw-line-inactive.cold"
+        );
+        //}, ["gl-draw-line-inactive.cold", "gl-draw-line-active.cold", "gl-draw-line-static.cold", "gl-draw-line-inactive.hot", "gl-draw-line-active.hot", "gl-draw-line-static.hot"]);
+
+        map.addSource("route", {
+            //mapbox source for geojson data
+            type: "geojson",
+            data: {
+                type: "FeatureCollection",
+                features: [],
+            },
+        });
+
+        map.addLayer({
+            id: "linefill",
+            type: "fill",
+            source: "route",
+            layout: {},
+            paint: {
+                "fill-color": "#088",
+                "fill-opacity": 0.1,
+            },
+        });
+
+        map.addLayer({
+            id: "route",
+            type: "line",
+            source: "route",
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+            paint: {
+                "line-color": ["get", "color"],
+                "line-width": 5,
+            },
+        });
+
+        // map.addSource('draw', {
+        //     'type': 'geojson',
+        //     'data': {
+        //         'type': 'FeatureCollection',
+        //         'features': []
+        //     }
+        // });
+
+        // map.addLayer({
+        //     'id': 'drawLayer',
+        //     'type': 'line',
+        //     'source': 'draw',
+        //     'layout': {
+        //         'line-join': 'round',
+        //         'line-cap': 'round'
+        //     },
+        //     'paint': {
+        //         'line-color': 'blue',
+        //         'line-width': 15
+        //     }
+        // });
+
+        // Create a popup, but don't add it to the map yet.
+        var popup = new mapboxgl.Popup({
+            closeButton: true,
+            closeOnClick: false,
+        });
+
+        map.on("click", "linefill", function (e) {
+            if (Draw.getMode() === "draw_line_string") {
+                //disable info when drawing
+                return;
+            }
+            // Change the cursor style as a UI indicator.
+            var coordinates = e.lngLat;
+            var props = e.features[0].properties;
+            console.log("props", props);
+            const descr = `
+            PROJECT_NU:${props.PROJECT_NU}
+            <br>
+            PROPONENT:${props.PROPONENT}
+            <br>
+            <button class="filter" project="${props.PROJECT_NU}">Filter by ${props.PROJECT_NU}</button>
+            `;
+            popup.setLngLat(coordinates).setHTML(descr).addTo(map);
+        });
+        map.on("mouseenter", "linefill", function (e) {
+            if (Draw.getMode() === "draw_line_string") {
+                //disable info when drawing
+                return;
+            }
+            // Change the cursor style as a UI indicator.
+            map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", "linefill", function () {
+            map.getCanvas().style.cursor = "";
+            // popup.remove();
+        });
+
+        map.on("contextmenu", () => {
+            console.log("right click");
+            saveData();
+        });
+
+        map.on("click", (e) => {
+            // console.log('pressedKeys', pressedKeys);
+            // if (pressedKeys && pressedKeys['17'] === true) {
+            //     Draw.changeMode(Draw.modes.DRAW_LINE_STRING)
+            // }
+
+            //console.log("e", e);
+            if (e.originalEvent.ctrlKey) {
+                console.log("Draw mode");
+                Draw.changeMode(Draw.modes.DRAW_LINE_STRING);
+            }
+        });
+
+        map.on("draw.delete", updateLineInfoBox);
+        function updateLineInfoBox() {
+            lineinfo.innerHTML = "";
+            lineinfo.style.display = "none";
+        }
+
+        // const popups = [];
+        // map.on('draw.create', updateArea);
+        // map.on('draw.delete', updateArea);
+        // map.on('draw.update', updateArea);
+        // map.on('draw.selectionchange', (e) => {
+        //     console.log('e', e);
+        // });
+
+        // function updateArea(e) {
+
+        //     console.log('11111111111', 1111111);
+        //     //remove all old popups
+        //     popups.forEach(i => i.remove())
+
+        //     var data = Draw.getAll();
+        //     const res = data.features.map(e => {
+        //         console.log('e', e);
+        //         const length = turf.length(e, { units: 'meters' });
+
+        //         const p = new mapboxgl.Popup({
+        //             closeButton: true,
+        //             closeOnClick: false
+        //         })
+        //             .setLngLat(e.geometry.coordinates[0])
+        //             .setHTML(length.toFixed(2) + "m")
+        //             .addTo(map);
+        //         popups.push(p)
+        //     })
+        // }
+    });
+
+    function getIsTiledInMapbox() {
+        console.log('getIsTiledInMapbox');
+        fetch(apiUrl + '?isTiledInMapbox=false')
+            .then(data => data.json())
+            .then((json) => {
+                const projectGeometry = [];
+                json.forEach((i) => {
+                    const c = JSON.parse(i.geometry);
+                    if (c.type === "FeatureCollection") {
+                        projectGeometry.push(c.features[0]);
+                    }
+                });
+
+                const collection = {
+                    type: "FeatureCollection",
+                    features: projectGeometry,
+                }
+                map.getSource("isTiledInMapox").setData(collection);
+            });
+    }
+
+    clearLineFilter.addEventListener("click", () => {
+        map.setFilter("route", null);
+        map.setFilter("linefill", null);
+    });
+
+    // enumerate ids of the layers
+    const toggleableLayerIds = ["mapbox-satellite", "NTS Unit Grid", "NTS Unit Labels", "NTS Block Grid", "NTS Block Labels", "bc-pipelines-all", "isTiledInMapox"];
+    const layersToColorize = ["all-wells", "well-licensee-labels", "facilities"];
+
+    const enabledByDefault = ["bc-unit-labels", "bc-unit-grids", "NTS Unit Grid", "NTS Unit Labels",  "NTS Block Grid", "NTS Block Labels"];
+
+    // set up the corresponding toggle button for each layer
+    for (var i = 0; i < toggleableLayerIds.length; i++) {
+        var id = toggleableLayerIds[i];
+
+        var link = document.createElement("a");
+        link.href = "#";
+        link.className = enabledByDefault.includes(id) ? "active" : "";
+        link.textContent = id;
+
+        link.onclick = function (e) {
+            var clickedLayer = this.textContent;
+            e.preventDefault();
+            e.stopPropagation();
+
+            var visibility = map.getLayoutProperty(clickedLayer, "visibility");
+            // console.log('clickedLayer', clickedLayer, visibility);
+
+            // toggle layer visibility by changing the layout object's visibility property
+            if (visibility === "visible" || _.isNil(visibility)) {
+                // HACK: visibility can be initially undefined
+                map.setLayoutProperty(clickedLayer, "visibility", "none");
+                this.className = "";
+                if (id === "mapbox-satellite") {
+                    layersToColorize.forEach((layer) => {
+                        map.setPaintProperty(layer, "text-color", "#000");
+                    });
+                }
+            } else {
+                this.className = "active";
+                map.setLayoutProperty(clickedLayer, "visibility", "visible");
+                if (id === "mapbox-satellite") {
+                    layersToColorize.forEach((layer) => {
+                        map.setPaintProperty(layer, "text-color", "#fff");
+                    });
+                }
+            }
+        };
+
+        var layers = document.getElementById("menu");
+        layers.appendChild(link);
+    }
+
+    inputFilter.addEventListener("input", (e) => {
+        const search = inputFilter.value;
+        setFilter(search);
+    });
+
+    groupsInput.addEventListener("change", (e) => {
+        const val = groups.value;
+        filters.group = val;
+        updateTable();
+
+        //update projects
+        projectsInput.style.display = "inline";
+        projectsInput.length = 0; //clear prev data
+
+        const projects = [
+            ...new Set(arrayData.filter((i) => i.group === filters.group).map((i) => i["Project #"])),
+        ].sort((a, b) => a - b);
+        projects.unshift("all"); //this will select all elements
+        projects.forEach((i) => {
+            if (i === "") i = "empty";
+            var option = document.createElement("option");
+            option.text = i;
+            option.value = i;
+            projectsInput.appendChild(option);
+        });
+    });
+
+    projectsInput.addEventListener("change", (e) => {
+        console.log("projectsInput");
+        const val = projectsInput.value;
+        filters.project = val;
+
+        inputFilter.value = projectsInput.value;
+        setFilter(projectsInput.value);
+
+        updateTable();
+    });
+
+    incompleteFilter.addEventListener("change", () => {
+        const val = incomplete.checked;
+        filters.incomplete = val;
+        // console.log("incomplete val", val);
+        updateTable();
+    });
+
+    corridorsFilter.addEventListener("change", () => {
+        const val = corridors.checked;
+        filters.corridors = val;
+        console.log("corridors val", val);
+        updateTable();
+    });
+
+    nextProjectButton.addEventListener("click", () => {
+        console.log("nextProject");
+        nextProject();
+    });
+
+    function nextProject() {
+        // const projects = [...new Set(arrayData.filter(i => i.group === filters.group).map(i => i['Project #']))].sort((a, b) => a - b)
+
+        /* const curr = projects.indexOf(filters.project)
+        if (projects[curr + 1]) {
+            filters.project = projects[curr + 1];
+            projectsInput.querySelector('[value="' + filters.project + '"]').selected = true // update selector val
+        } else {
+            // goto next group
+            console.warn('Switching to next group',);
+        } */
+
+        // find next empty project from this group
+        let gr;
+        if (filters.corridors) {
+            gr = [
+                ...new Set(
+                    arrayData
+                        .filter((i) => i.group === filters.group) // find all with current group
+                        .filter((i) => i.completed === false) // find all uncompleted
+                        .filter((i) => i.info["Corridor Exists"] === "TRUE") // find all with corridors
+                        .map((i) => i["Project #"])
+                ),
+            ]; // get the list of project numbers
+        } else {
+            gr = [
+                ...new Set(
+                    arrayData
+                        .filter((i) => i.group === filters.group) // find all with current group
+                        .filter((i) => i.completed === false) // find all uncompleted
+                        .map((i) => i["Project #"])
+                ),
+            ]; // get the list of project numbers
+        }
+
+        filters.project = gr.find((i) => +i > +filters.project);
+        projectsInput.querySelector('[value="' + filters.project + '"]').selected = true; // update selector val
+        inputFilter.value = filters.project;
+        setFilter(filters.project);
+
+        updateTable();
+    }
+
+    function updateTable() {
+        const data = filterData();
+        pagination.setTotalItems(data.length);
+        pagination.reset();
+        printPage(0, options.itemsPerPage, data);
+    }
+
+    function filterData() {
+        const data = arrayData
+            .filter((i) => {
+                if (filters.search && filters.search !== "") {
+                    return +i["Project #"] === +filters.search;
+                }
+                return i;
+            })
+            .filter((i) => {
+                if (filters.group && filters.group !== "") {
+                    return i["group"] === filters.group;
+                }
+                return i;
+            })
+            .filter((i) => {
+                if (filters.incomplete) {
+                    return i.completed === false;
+                }
+                return i;
+            })
+            .filter((i) => {
+                if (filters.corridors) {
+                    return i.info["Corridor Exists"] === "TRUE";
+                }
+                return i;
+            })
+            .filter((i) => {
+                if (filters.project) {
+                    if (filters.project === "all") {
+                        return i;
+                    }
+
+                    return +i["Project #"] === +filters.project;
+                }
+                return i;
+            });
+
+        console.log("filters====>", filters);
+        console.log("filtered data", data);
+        return data;
+    }
+
+    function setFilter(filter) {
+        inputFilter.value = filter;
+        filters.search = +filter;
+
+        if (filter !== "") {
+            map.setFilter("route", ["==", ["to-number", ["get", "PROJECT_NU"]], +filter]);
+            map.setFilter("linefill", ["==", ["to-number", ["get", "PROJECT_NU"]], +filter]);
+        } else {
+            map.setFilter("route", null);
+            map.setFilter("linefill", null);
+        }
+        updateTable();
+    }
+
+    shortcut.add("Ctrl+S", function () {
+        console.log("Saving");
+
+        var modal = document.getElementById("myModal");
+        if (modal.style.display === "block") {
+            //modal is already opened
+            var save = document.getElementById("save");
+            save.click();
+        } else {
+            saveData(); //open modal
+        }
+    });
+
+    document.addEventListener("click", (e) => {
+        if (e.target.classList.contains("filter")) {
+            const prId = e.target.getAttribute("project");
+            setFilter(prId);
+        }
+
+        const target = e.target.closest("td.pipe");
+        if (target !== null) {
+          console.log(target);
+            const id = target.getAttribute("lineid");
+            const segment = target.getAttribute("segment");
+            const type = target.getAttribute("type");
+            const c1 = target.getAttribute("coord1").split(",");
+            const c2 = target.getAttribute("coord2").split(",");
+            const fromLoc = target.getAttribute("from_loc");
+            const toLoc = target.getAttribute("to_loc");
+
+            if (+id > 0) filterLinesById(id);
+
+            //draw square by coords
+            let r = 450;
+            if (type.toUpperCase() === "DLS") {
+                r = 400;
+                queryPipeGeometryFromAPI(id, segment, r, 'DLS', fromLoc,toLoc);
+            }
+            else {
+              queryPipeGeometryFromAPI(id, segment, r, 'NTS',fromLoc,toLoc);
+            }
+        }
+    });
+
+    let currentPipeline = null;
+    function queryPipeGeometryFromAPI(pipe_number, pipe_segment_number, r, grid_type, fromLoc,toLoc) {
+        Draw.deleteAll();
+
+        const query = apiUrl + "?pipe_number=" + pipe_number + "&pipe_segment_number=" + pipe_segment_number;
+        console.log("query", query);
+        fetch(query)
+            .then((response) => response.json())
+            .then((pipeline) => {
+                const currentPipelineAttributes = _.find(
+                    arrayData,
+                    (i) =>
+                        i["Project #"] === parseInt(pipe_number) && i["Segment #"] === parseInt(pipe_segment_number)
+                );
+                currentPipeline = pipeline;
+                currentPipeline.expectedLength = currentPipelineAttributes["Length (m)"] || 0;
+                // console.log("currentPipeline", currentPipeline);
+
+                if (pipeline.pipe_geojson) {
+                    // const collection = {
+                    //     'type': 'FeatureCollection',
+                    //     'features': [i.pipe_geojson]
+                    // }
+                    Draw.deleteAll();
+                    Draw.add(pipeline.pipe_geojson);
+                }
+
+                if (pipeline.pipe_squares && grid_type === 'DLS') {
+                    const c1 = pipeline.pipe_squares[0][0];
+                    const c2 = pipeline.pipe_squares[0][1];
+
+                    //Hack: Don't want to try fixing square geoms in DB. Just shift them here.
+                    from_geom = turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.090, 270);
+                    to_geom = turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.090, 270);
+
+                    const s1 = createSquare(from_geom, r / 1000 / 2);
+                    const s2 = createSquare(to_geom, r / 1000 / 2);
+                    const collection = turf.featureCollection([s1, s2]);
+                    map.getSource("squares").setData(collection);
+                    const combined = turf.combine(collection);
+                    const bounds = turf.bbox(combined);
+                    map.fitBounds(bounds, { padding: 100 });
+                }
+                else if (pipeline.pipe_squares && grid_type === 'NTS') {
+                    const c1 = pipeline.pipe_squares[0][0];
+                    const c2 = pipeline.pipe_squares[0][1];
+
+                    //Translate Point
+                    const from_qtr_unit = fromLoc.charAt(0);
+
+                    let from_geom;
+                    if (from_qtr_unit === 'A'){
+                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90),0.225,180);
+                    }
+                    else if (from_qtr_unit === 'B'){
+                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270),0.225,180);
+                    }
+                    else if (from_qtr_unit === 'C'){
+                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270),0.225,0);
+                    }
+                    else if (from_qtr_unit === 'D'){
+                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90),0.225,0);
+                    }
+
+                    const to_qtr_unit = toLoc.charAt(0);
+                    let to_geom;
+                    if (to_qtr_unit === 'A'){
+                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90),0.225,180);
+                    }
+                    else if (to_qtr_unit === 'B'){
+                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270),0.225,180);
+                    }
+                    else if (to_qtr_unit === 'C'){
+                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270),0.225,0);
+                    }
+                    else if (to_qtr_unit === 'D'){
+                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90),0.225,0);
+                    }
+
+                    const s1 = createSquare(from_geom, r / 1000 / 2);
+                    const s2 = createSquare(to_geom, r / 1000 / 2);
+                    const collection = turf.featureCollection([s1, s2]);
+                    map.getSource("squares").setData(collection);
+                    const combined = turf.combine(collection);
+                    const bounds = turf.bbox(combined);
+                    map.fitBounds(bounds, { padding: 100 });
+                }
+                else {
+                    //const c = turf.centerOfMass(i.pipe_geojson)
+                    // console.log("i.pipe_geojson", pipeline.pipe_geojson);
+                    if (!pipeline.pipe_geojson) {
+                        toast("Empty geometry! No records in DB");
+                    } else {
+                        const bbox = turf.bbox(pipeline.pipe_geojson);
+                        map.fitBounds(bbox, { padding: 100 });
+                    }
+
+                    // console.log('c.geometry.coordinates', c.geometry.coordinates);
+                    // map.flyTo({
+                    //     center: c.geometry.coordinates,
+                    //     essential: true,
+                    //     zoom: 14
+                    // })
+                }
+
+                filters.number = pipe_number;
+                filters.segment = pipe_segment_number;
+
+                //set the save icon
+                document.querySelectorAll("button.saveData").forEach((i) => (i.style.visibility = "hidden"));
+                const id = "b_" + pipe_number + "_" + pipe_segment_number;
+                // console.log("id", id);
+                const button = document.getElementById(id);
+                button.style.visibility = "visible";
+
+                //set length from DB
+                const pipeId = "pipe_" + pipe_number + "_" + pipe_segment_number;
+                const pipe = document.getElementById(pipeId);
+
+                // console.log("i[0]", pipeline[0]);
+                if (pipeline[0] && pipeline[0].properties) {
+                    const length =
+                        pipeline[0].properties && pipeline[0].properties.length
+                            ? Math.ceil(pipeline[0].properties.length) + "m"
+                            : "none";
+                    pipe.innerHTML = "Pipe length from DB: " + length;
+                }
+            });
+
+        //color code polygon according to the number of rows in DB
+        const queryNumber = apiUrl + "?pipe_number=" + pipe_number;
+        fetch(queryNumber)
+            .then((i) => i.json())
+            .then((i) => {
+                console.log("RESULT ROWS", i);
+                let color = "";
+                const inDB = +i;
+                const all = arrayData.filter((s) => +s["Project #"] === +pipe_number).length;
+            });
+    }
+
+    function printPage(start, end, data) {
+        console.log("printPage data", data);
+        currentPage.length = 0;
+        const queryData = data.slice(start, end).map((i) => {
+            currentPage.push({
+                number: i["Project #"],
+                segment: i["Segment #"],
+                done: false,
+            });
+            return [i["Project #"], i["Segment #"]];
+        });
+
+        console.log("queryData", queryData);
+
+        const res = getlines(queryData);
+        res.then((d) => {
+            console.log("COMPLETED ELEMENTS", d);
+            if (!d || d.length === 0) return;
+            //compare data and find the number of processed pipes in DB
+
+            const projectGeometry = [];
+
+            d.forEach((i) => {
+                //update main array with completed elements
+                const { number, segment } = i;
+
+                //arrayData.find(i=>+i['Project #'] === +number && +i['Segment #'] === +segment).completed = true;
+
+                const id = `green_${number}_${segment}`;
+                //console.log('id===>', id);
+
+                const el = document.getElementById(id);
+                if (el) {
+                    //some elements returned by DB does not exist on this page
+                    el.style.backgroundColor = "green";
+                    const s = (currentPage.find((i) => i.number === +number && i.segment === +segment).done = true);
+                    //console.log('s===>', s);
+                    //console.log('s', number, segment);
+                }
+
+                projectGeometry.push(JSON.parse(i.geometry));
+                map.getSource("projectGeometry").setData({
+                    type: "FeatureCollection",
+                    features: projectGeometry,
+                });
+            });
+
+            console.log("projectGeometry", projectGeometry);
+        });
+
+        let table = '<table class="lines">';
+        data.slice(start, end).forEach((i) => {
+            // console.log('i',i);
+            const id = `${i["Project #"]}_${i["Segment #"]}`;
+            table += `<tr class="line">
+                        <td class="gotPipe"  id="green_${id}"></td>
+                        <td class="pipe"
+                            lineid="${i["Project #"]}"
+                            segment="${i["Segment #"]}"
+                            type="${i["Grid"]}"
+                            coord1 = "${i["Long_1"]},${i["Lat_1"]}"
+                            coord2 = "${i["Long_2"]},${i["Lat_2"]}"
+                            from_loc = "${i.info["From"]}"
+                            to_loc = "${i.info["To"]}"
+                            >
+                            <div> <b>${i["Project #"]}|#${i["Segment #"]}</b> / ${i["Product"]} / ${i.info["Outer Diam (mm)"]} mm </div>
+                            <div>${i["Company"]}</div>
+                            <div><b>${i["Status"]}</b> / ${i["Grid"]} | ${i.info["As Built Date"]}</div>
+                            <div><b>Length(m): ${i["Length (m)"]}</b></div>
+                            <div class="pipeLength" id="pipe_${id}"> </div>
+                            <div><b>From</b>: ${i.info["From"]}</div>
+                            <div><b>To</b>:${i.info["To"]}</div>
+
+
+                        </td>
+                        <td>
+                            <button class="btn saveData" id="b_${id}" onclick="saveData(${i["Project #"]}, ${i["Segment #"]})" style="visibility:hidden;"><i class="fa fa-save"></i></button>
+                        </td>
+                    </tr>
+                `;
+        });
+        table += "</table>";
+        list.innerHTML = table;
+    }
+
+    function getlines(queryData) {
+        console.log("queryData", queryData);
+
+        return fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: new URLSearchParams({
+                query_lines: JSON.stringify(queryData),
+            }),
+        })
+            .then((i) => i.json())
+            .then((json) => {
+                console.log("getlines response json", json);
+                return json;
+            })
+            .catch(function (error) {
+                console.error("Request failed", error);
+            });
+    }
+
+    function saveData() {
+
+        Draw.changeMode(Draw.modes.SIMPLE_SELECT);
+
+        const pipses = Draw.getAll().features.length;
+        if (pipses > 1) {
+            alert("More than 1 line!")
+            return;
+        }
+
+        if (filters.number > 0 && filters.segment > 0) {
+            openModal(saveDataToDB);
+        } else {
+            console.warn("No data to save");
+        }
+    }
+
+    function saveDataToDB() {
+        console.log("arguments", arguments);
+
+        const { score, note, additionalData } = arguments[0];
+        const { number, segment } = filters;
+
+        console.log(score, note, number, segment);
+        //get drawn data
+        const collection = Draw.getAll();
+        const feature = collection.features[0];
+
+        if (!feature) {
+            toast("Empty geometry!");
+            console.warn("Empty geometry!");
+            console.warn(collection);
+            //return;
+        } else {
+            const length = turf.length(collection.features[0], { units: "meters" });
+            feature.properties.length = length;
+        }
+
+        console.log("feature!!!!!!!!!!!!!!!!!!!!!", feature);
+        console.log("collection!!!!!!!!!!!!!!!!!!!!!", collection);
+
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: new URLSearchParams({
+                score,
+                note,
+                insert_pipe: number,
+                pipe_segment_number: segment,
+                pipe_geojson: JSON.stringify(collection),
+                additional_pipe_ids: JSON.stringify(additionalData)
+                //pipe_geojson: JSON.stringify(collection.features[collection.features.length - 1])//save last geometry object or line
+            }),
+        })
+            .then((response) => {
+                if (response.ok) {
+                    console.log("the call works ok", response);
+                }
+                toast("Geometry saved");
+                goToNext();
+                calcColors(); //racalculate colors aftes saving data
+
+                //update color
+                console.log('',);
+                document.getElementById(`green_${number}_${segment}`).style.backgroundColor = 'green'
+            })
+            .catch(function (error) {
+                console.log("Request failed", error);
+            });
+
+
+        getIsTiledInMapbox();//redraw the isTiledInMapbox() layer
+    }
+
+    function findFirstEmptyIndex(currentPage) {
+        let next = 0;
+        for (let index = 0; index < currentPage.length; index++) {
+            const element = currentPage[index];
+            if (!element.done) {
+                next = index;
+                break;
+            }
+        }
+        return next;
+    }
+
+    function goToNext() {
+        console.log("filters", filters);
+        console.log("currentPage", currentPage);
+
+        let next;
+        const current = currentPage.findIndex(
+            (i) => +i.number === +filters.number && +i.segment === +filters.segment
+        );
+        currentPage[current].done = true;
+
+        for (let index = current; index < currentPage.length; index++) {
+            console.log("curren[index]", currentPage[index]);
+            console.log("[index]", index);
+            const element = currentPage[index];
+            if (!element.done) {
+                next = index;
+                break;
+            }
+        }
+
+        console.log("(next + 1) >= currentPage.length", current + 1, currentPage.length);
+
+        if (current + 1 >= currentPage.length) {
+            const page = pagination.getCurrentPage();
+
+            console.log("pagination._getLastPage() <= page + 1", pagination._getLastPage(), page + 1);
+            if (pagination._getLastPage() > page + 1) {
+                console.log("!!!!!!!!!!!!!!!!!!!!");
+
+                document.querySelector(".right").scrollTo(0, 0);
+                pagination.movePageTo(page + 1); //go to next page
+
+                setTimeout(() => {
+                    const index = findFirstEmptyIndex(currentPage);
+                    const nextEl = currentPage[index];
+                    document.querySelector(`td[lineid="${nextEl.number}"][segment="${nextEl.segment}"]`).click(); //click first element
+                }, 500);
+                //goToNext();
+                return;
+            }
+        }
+
+        console.log("next", next);
+        const nextElement = currentPage[next];
+        if (nextElement) {
+            document.querySelector(`td[lineid="${nextElement.number}"][segment="${nextElement.segment}"]`).click();
+        }
+    }
+
+    async function calcColors() {
+        // recalculate color and update map
+
+        const groups = [];
+        const projects = [];
+        const query = apiUrl + "?all_pipes";
+        await fetch(query)
+            .then((i) => i.json())
+            .then((json) => {
+                allPipes = json; //global
+                console.log("json", json);
+                const g = [...new Set(json.map((i) => i.group))].sort((a, b) =>
+                    a.localeCompare(b, "en", { numeric: true })
+                );
+                groups.push(...g);
+            });
+        console.log("=> groups", groups);
+
+        //update main array with groups from DB
+        arrayData.forEach((i) => {
+            const n = +i["Project #"];
+            const s = +i["Segment #"];
+            const pipe = allPipes.find((d) => +d.number === n && +d.segment === s);
+
+            if (pipe && pipe.group) {
+                i.group = pipe.group;
+            } else {
+                i.group = "empty";
+            }
+            if (pipe) {
+                i.completed = pipe.completed;
+                i.geometry = pipe.geometry;
+            }
+        });
+
+        //print groups selection
+        groups.forEach((i) => {
+            if (i === "") i = "empty";
+
+            const pipesInGroup = _.filter(arrayData, (d) => d.group === i);
+            // console.log('pipesInGroup', pipesInGroup);
+            const pipesInGroupCompleted = _.filter(pipesInGroup, (p) => p.completed);
+            // console.log('pipesInGroupCompleted', pipesInGroupCompleted);
+            const fractionCompleted = pipesInGroupCompleted.length / pipesInGroup.length;
+
+            const option = document.createElement("option");
+            option.text = i + ` (${_.round(fractionCompleted * 100, 1)}%)`;
+            option.value = i;
+            groupsInput.appendChild(option);
+        });
+
+        //calculate colors based on input data from CSV and DB arrays
+        const counter = new Map();
+        arrayData.forEach((i) => {
+            const num = i["Project #"];
+
+            let c = counter.get(num);
+            let done = 0;
+            let all = 0;
+
+            if (!c) {
+                counter.set(num, {
+                    done: 0,
+                    all: 0,
+                });
+            }
+
+            c = counter.get(num);
+            all = c.all + 1;
+
+            if (i.completed) {
+                counter.set(num, {
+                    done: c.done + 1,
+                    all: all,
+                });
+            } else {
+                counter.set(num, {
+                    done: c.done,
+                    all: all,
+                });
+            }
+        });
+
+        console.log("counter", counter);
+
+        // const counterJson = new Map();
+        // allPipes.forEach(i => {
+        //     const num = +i.number
+        //     const c = counterJson.get(num)
+        //     if (c) {
+        //         const s = c + 1
+        //         counterJson.set(num, s)
+        //     } else {
+        //         counterJson.set(num, 1)
+        //     }
+        // })
+
+        // const jsonColors = new Map();
+
+        // counter.forEach((value, key) => {
+        //     const d = counterJson.get(key)
+        //     if (d) {
+        //         if (value > d) {
+        //             jsonColors.set(key, 'orange')
+        //         }
+        //         if (value === d) {
+        //             jsonColors.set(key, 'green')
+        //         }
+        //     } else {
+        //         jsonColors.set(key, 'gray')
+        //     }
+        // })
+
+        // console.log('!!!!! counter', counter);
+        // console.log('!!!!! counterJson', counterJson);
+
+        listJson.features.forEach((i) => {
+            const num = +i.properties.PROJECT_NU;
+            const c = counter.get(num);
+            let color = "gray";
+
+            if (c) {
+                if (c.done === 0) {
+                    color = "gray";
+                }
+                if (c.done < c.all && c.done >= 1) {
+                    color = "orange";
+                }
+                if (c.done === c.all) {
+                    color = "green";
+                }
+            }
+            i.properties.color = color;
+        });
+
+        map.getSource("route").setData(listJson);
+
+
+        const finished = allPipes.filter(i => i.completed === true).length
+        const all = allPipes.length
+        const percentDone = ((finished * 100) / all).toFixed(2)
+        allpipesDiv.innerHTML = `<b>${finished.toLocaleString()} / ${all.toLocaleString()} (${percentDone}%)</b>`;
+
+    }
+
+    function filterLinesById(id) {
+        if (!map || !listJson || !listJson.features) return;
+        console.log("filterLinesById", id);
+
+        const line = listJson.features.find((i) => +i.properties.PROJECT_NU === +id);
+
+        if (line) {
+            console.log("line", line);
+            const bbox = turf.bbox(line);
+            map.fitBounds(bbox, { padding: 50 });
+            map.setFilter("route", ["==", ["to-number", ["get", "PROJECT_NU"]], +id]);
+            map.setFilter("linefill", ["==", ["to-number", ["get", "PROJECT_NU"]], +id]);
+        }
+    }
+
+    function createSquare(center, radius) {
+        const circele = turf.circle(center, radius, { steps: 64 });
+        const bbox = turf.bbox(circele);
+        const square = turf.bboxPolygon(bbox);
+        return square;
+    }
+
+    function toast(text) {
+        Toastify({
+            text: text,
+            duration: 1500,
+            // destination: "https://github.com/apvarun/toastify-js",
+            newWindow: true,
+            close: true,
+            gravity: "top", // `top` or `bottom`
+            position: "center", // `left`, `center` or `right`
+            backgroundColor: "linear-gradient(to right, #3887be, #2aa9bf)",
+            stopOnFocus: true, // Prevents dismissing of toast on hover
+            onClick: function () { }, // Callback after click
+        }).showToast();
+    }
+
+    function openModal(callback) {
+        // Get the modal
+        var modal = document.getElementById("myModal");
+        var save = document.getElementById("save");
+        var score = document.getElementById("score");
+        var scoreInput = document.getElementById("score");
+        var noteInput = document.getElementById("note");
+        var cancel = document.getElementById("cancel");
+        var span = document.getElementsByClassName("close")[0];
+        var saveAsDiv = document.getElementById("savelist")
+
+        modal.style.display = "block";
+        // When the user clicks on <span> (x), close the modal
+        span.onclick = function () {
+            modal.style.display = "none";
+        };
+        save.onclick = function () {
+
+            //get additional data from SAVE AS DROPDOWN
+            const additionalData = [];
+            document.querySelectorAll(".additional_data:checked").forEach(i => {
+                const segment = i.getAttribute("segment")
+                const project = i.getAttribute("project")
+
+                additionalData.push({
+                    segment,
+                    project
+                })
+            })
+
+
+            console.log("Save");
+            const score = scoreInput.value;
+            const note = noteInput.value;
+            if (callback) {
+                callback({ score, note, filters, additionalData });
+            }
+            modal.style.display = "none";
+        };
+        cancel.onclick = function () {
+            console.log("Cancel");
+            modal.style.display = "none";
+        };
+
+        //Save AS part
+        const currentId = arrayData.filter(i => +i['Project #'] === +filters.project && +i['Segment #'] === +filters.segment);
+        const saveList = arrayData.filter(i => +i['Project #'] === +filters.project && +i['Segment #'] !== +filters.segment)
+        const savelistDiv = saveList.map(i => {
+            const id = `${i['Project #']}_${i['Segment #']}`;
+            return `<label for="pipe_${id}">
+                    <div class="nowrap">
+                        <input class="additional_data" id="pipe_${id}" segment="${i['Segment #']}" project="${i['Project #']}" type="checkbox">#${i['Segment #']} length: ${i['Length (m)']} m
+                    </div>
+                </label>`
+        })
+        saveAsDiv.innerHTML = `
+                Current #${currentId[0]['Segment #']} - ${currentId[0]['Length (m)']}m
+                ${savelistDiv.join("")}
+               `;
+        // When the user clicks anywhere outside of the modal, close it
+        // window.onclick = function (event) {
+        //     if (event.target == modal) {
+        //         modal.style.display = "none";
+        //     }
+        // }
+    }
+</script>
+
+</html>
