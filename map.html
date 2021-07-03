@@ -30,6 +30,10 @@
 
     <script src="js/shortcut.js"></script>
     <link rel="stylesheet" href="css/main.css" />
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wicket/1.3.6/wicket.min.js"
+        integrity="sha512-7V9RlkyO655oDrkJ7kMXAa4Z+DS0+Kq/eXV0ZKWAv9RJtstw7rHJU1/KgpLovGZtL2FaJ9L24w3qa6L/qy3spg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 
 <body class="container">
@@ -49,51 +53,49 @@
                 <button id="save" class="button blue">Save</button>
                 <button id="cancel" class="button blue">Cancel</button>
 
-                <div class="dropdown">
-                    <button id="saveas" class="button blue dropdown">Save as</button>
-                    <div class="dropdown-content" id="savelist">
-                    </div>
-                </div>
+
             </div>
         </div>
     </div>
 
     <div class="left">
         <nav id="menu">
-            <a href="#" id="clearLineFilter" class="active">Clear filters</a>
+            <!-- <a href="#" id="clearLineFilter" class="active">Clear filters</a> -->
         </nav>
         <div id="lineinfo"></div>
         <div id="map"></div>
     </div>
     <div class="right">
-        <div id="allpipes"></div>
-        <div id="">
-            <select id="groups"></select>
-            <select id="projects" style="display: none"></select>
-        </div>
-        <div style="display: flex">
+        <div style="display: none;">
+            <div id="allpipes"></div>
+            <div id="">
+                <select id="groups"></select>
+                <select id="projects" style="display: none"></select>
+            </div>
+            <div style="display: flex">
+                <div>
+                    <label class="switch">
+                        <input type="checkbox" id="incomplete" />
+                        <div class="slider round"></div>
+                    </label>
+                </div>
+                <div style="position: relative; right: -155px">
+                    <label class="switch">
+                        <input type="checkbox" id="corridors" />
+                        <div class="slider second-slider round"></div>
+                    </label>
+                </div>
+            </div>
             <div>
-                <label class="switch">
-                    <input type="checkbox" id="incomplete" />
-                    <div class="slider round"></div>
-                </label>
+                <input type="search" id="inputFilter" placeholder="filter" />
             </div>
-            <div style="position: relative; right: -155px">
-                <label class="switch">
-                    <input type="checkbox" id="corridors" />
-                    <div class="slider second-slider round"></div>
-                </label>
+            <div id="paginator">
+                <div id="pagination1" class="tui-pagination"></div>
             </div>
-        </div>
-        <div>
-            <input type="search" id="inputFilter" placeholder="filter" />
-        </div>
-        <div id="paginator">
-            <div id="pagination1" class="tui-pagination"></div>
         </div>
         <div id="list"></div>
 
-        <div style="text-align: center">
+        <div style="text-align: center; display: none;">
             <button id="next" class="button">Next project &rarr;</button>
         </div>
     </div>
@@ -101,7 +103,7 @@
 
 <script>
     //const apiUrl = "https://petro-ninja-pipeline-builder.herokuapp.com/api/api_v2.php";
-    const apiUrl = 'http://serg.one/mapbox-pipeline/api/api_v2.php';
+    const apiUrl = 'http://serg.one/mapbox-pipeline/api/api_v3.php';
     var pressedKeys = {};
     window.onkeyup = function (e) {
         pressedKeys[e.keyCode] = false;
@@ -117,7 +119,7 @@
     };
 
     const currentPage = [];
-
+    let selectedId = 0;
     let listJson = {};
     let arrayData = [];
     let pagination;
@@ -309,7 +311,6 @@
             }
             display(g)
         })
-
         //display(vertex);
         display(geojson);
     };
@@ -330,8 +331,7 @@
 
     map.on("load", function () {
 
-
-        fetch("data/pipeline_geometry.xlsx")
+        fetch("data/pipeline_geometry_no_functions.xlsx")
             .then(function (res) {
                 if (!res.ok) throw new Error("fetch failed");
                 return res.arrayBuffer();
@@ -340,62 +340,41 @@
                 var data = new Uint8Array(ab);
                 var wb = XLSX.read(data, { type: "array" });
 
+
                 var first_sheet_name = wb.SheetNames[0];
                 var worksheet = wb.Sheets[first_sheet_name];
                 arrayData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
 
-                d3.csv("data/New Attribute Table - 3.csv").then((CSV) => {
-                    console.log("CSV", CSV);
-                    arrayData.forEach((A) => {
-                        const n = +A["Project #"];
-                        const s = +A["Segment #"];
-                        const gr = CSV.find((d) => +d["Project #"] === n && +d["Segment #"] === s);
-                        if (gr) {
-                            A.info = { ...gr };
-                        }
-                    });
+                console.log('arrayData', arrayData);
 
-                    console.log("arrayData (init)", arrayData);
-                    /************************ End of conversion ************************/
-                    pagination = new tui.Pagination(document.getElementById("pagination1"), options);
-                    pagination.setTotalItems(arrayData.length);
-                    pagination.reset();
-                    pagination.on("afterMove", ({ page }) => {
-                        printPage(
-                            (page - 1) * options.itemsPerPage,
-                            (page - 1) * options.itemsPerPage + options.itemsPerPage,
-                            filterData()
-                        );
-                    });
-                    printPage(0, options.itemsPerPage, arrayData);
-                });
+                let table = '<table class="lines">';
+                arrayData.forEach((i, key) => {
 
-                //query all pipes from db to color code the pipes
-                shp("data/Pipeline_Rights_of_Way_(Permitted).zip").then(function (geojson) {
-                    listJson = { ...geojson };
-                    calcColors().then((jsonColors) => {
-                        // //update main array with groups from DB
-                        // arrayData.forEach(i => {
-                        //     const n = +i['Project #'];
-                        //     const s = +i['Segment #'];
-                        //     const gr = allPipes.find(d => +d.number === n && +d.segment === s);
-                        //     if (gr && gr.group) {
-                        //         i.group = gr.group
-                        //     } else {
-                        //         i.group = 'empty';
-                        //     }
-                        //     if (gr) {
-                        //         i.completed = gr.completed
-                        //         i.geometry = gr.geometry
-                        //     }
-                        // })
-                    });
+                    const id = `${i["Pipeline ID"]}`;
+
+                    table += `<tr class="line" id="pipe_${id}" key="${key}">
+                        <td class="gotPipe" id="green_${id}"></td>
+                        <td class="pipe" lineid="${id}"                            >
+                            <div> <b>${i["Pipeline ID"]} | ${i["Field"]}</b></div>
+                            <div>${i["Raw From"]} ${i["Raw To"]}</div>
+                            <div><b>Length: ${i["Length (km)"]}km</b></div>
+                            <div><b>Diameter</b>: ${i["Diameter"]}mm</div>
+                        </td>
+                        <td>
+                            <button class="btn saveData" id="b_${id}" onclick="saveData(${i["Project #"]}, ${i["Segment #"]})" style="visibility:hidden;"><i class="fa fa-save"></i></button>
+                        </td>
+                    </tr>
+                `;
                 });
+                table += "</table>";
+                list.innerHTML = table;
+
+                calcColors()
             });
 
         //START===========isTiledInMapox=======================
 
-        getIsTiledInMapbox();
+        // getIsTiledInMapbox();
 
 
         map.addSource("isTiledInMapox", {
@@ -503,28 +482,6 @@
             },
         });
 
-        // map.addSource('draw', {
-        //     'type': 'geojson',
-        //     'data': {
-        //         'type': 'FeatureCollection',
-        //         'features': []
-        //     }
-        // });
-
-        // map.addLayer({
-        //     'id': 'drawLayer',
-        //     'type': 'line',
-        //     'source': 'draw',
-        //     'layout': {
-        //         'line-join': 'round',
-        //         'line-cap': 'round'
-        //     },
-        //     'paint': {
-        //         'line-color': 'blue',
-        //         'line-width': 15
-        //     }
-        // });
-
         // Create a popup, but don't add it to the map yet.
         var popup = new mapboxgl.Popup({
             closeButton: true,
@@ -569,12 +526,6 @@
         });
 
         map.on("click", (e) => {
-            // console.log('pressedKeys', pressedKeys);
-            // if (pressedKeys && pressedKeys['17'] === true) {
-            //     Draw.changeMode(Draw.modes.DRAW_LINE_STRING)
-            // }
-
-            //console.log("e", e);
             if (e.originalEvent.ctrlKey) {
                 console.log("Draw mode");
                 Draw.changeMode(Draw.modes.DRAW_LINE_STRING);
@@ -587,35 +538,7 @@
             lineinfo.style.display = "none";
         }
 
-        // const popups = [];
-        // map.on('draw.create', updateArea);
-        // map.on('draw.delete', updateArea);
-        // map.on('draw.update', updateArea);
-        // map.on('draw.selectionchange', (e) => {
-        //     console.log('e', e);
-        // });
 
-        // function updateArea(e) {
-
-        //     console.log('11111111111', 1111111);
-        //     //remove all old popups
-        //     popups.forEach(i => i.remove())
-
-        //     var data = Draw.getAll();
-        //     const res = data.features.map(e => {
-        //         console.log('e', e);
-        //         const length = turf.length(e, { units: 'meters' });
-
-        //         const p = new mapboxgl.Popup({
-        //             closeButton: true,
-        //             closeOnClick: false
-        //         })
-        //             .setLngLat(e.geometry.coordinates[0])
-        //             .setHTML(length.toFixed(2) + "m")
-        //             .addTo(map);
-        //         popups.push(p)
-        //     })
-        // }
     });
 
     function getIsTiledInMapbox() {
@@ -639,16 +562,16 @@
             });
     }
 
-    clearLineFilter.addEventListener("click", () => {
-        map.setFilter("route", null);
-        map.setFilter("linefill", null);
-    });
+    // clearLineFilter.addEventListener("click", () => {
+    //     map.setFilter("route", null);
+    //     map.setFilter("linefill", null);
+    // });
 
     // enumerate ids of the layers
-    const toggleableLayerIds = ["mapbox-satellite", "NTS Unit Grid", "NTS Unit Labels", "NTS Block Grid", "NTS Block Labels", "bc-pipelines-all", "isTiledInMapox"];
+    //const toggleableLayerIds = ["mapbox-satellite", "NTS Unit Grid", "NTS Unit Labels", "NTS Block Grid", "NTS Block Labels", "bc-pipelines-all", "isTiledInMapox"];
+    const toggleableLayerIds = ["mapbox-satellite"];
     const layersToColorize = ["all-wells", "well-licensee-labels", "facilities"];
-
-    const enabledByDefault = ["bc-unit-labels", "bc-unit-grids", "NTS Unit Grid", "NTS Unit Labels",  "NTS Block Grid", "NTS Block Labels"];
+    const enabledByDefault = ["bc-unit-labels", "bc-unit-grids", "NTS Unit Grid", "NTS Unit Labels", "NTS Block Grid", "NTS Block Labels"];
 
     // set up the corresponding toggle button for each layer
     for (var i = 0; i < toggleableLayerIds.length; i++) {
@@ -868,6 +791,8 @@
         }
     });
 
+
+    const wkt = new Wkt.Wkt();
     document.addEventListener("click", (e) => {
         if (e.target.classList.contains("filter")) {
             const prId = e.target.getAttribute("project");
@@ -876,31 +801,50 @@
 
         const target = e.target.closest("td.pipe");
         if (target !== null) {
-          console.log(target);
-            const id = target.getAttribute("lineid");
-            const segment = target.getAttribute("segment");
-            const type = target.getAttribute("type");
-            const c1 = target.getAttribute("coord1").split(",");
-            const c2 = target.getAttribute("coord2").split(",");
-            const fromLoc = target.getAttribute("from_loc");
-            const toLoc = target.getAttribute("to_loc");
 
-            if (+id > 0) filterLinesById(id);
+            selectedId = target.getAttribute("lineid");
 
-            //draw square by coords
-            let r = 450;
-            if (type.toUpperCase() === "DLS") {
-                r = 400;
-                queryPipeGeometryFromAPI(id, segment, r, 'DLS', fromLoc,toLoc);
+            const sq = arrayData.find(i => i['Pipeline ID'] === selectedId);
+            if (sq) {
+                const to = sq['Approximate From Geometry (JSON)'];
+                const from = sq['Approximate To Geometry (JSON)'];
+                const toJSON = wkt.read(to).toJson();
+                const fromJSON = wkt.read(from).toJson();
+                const collection = turf.featureCollection([
+                    turf.feature(toJSON),
+                    turf.feature(fromJSON)
+                ]);
+                map.getSource("squares").setData(collection);
+                const combined = turf.combine(collection);
+                const bounds = turf.bbox(combined);
+                map.fitBounds(bounds, { padding: 100 });
             }
-            else {
-              queryPipeGeometryFromAPI(id, segment, r, 'NTS',fromLoc,toLoc);
-            }
+
+            getLine(selectedId)
+
         }
     });
 
+    function getLine(id) {
+
+        Draw.deleteAll();
+
+        const query = apiUrl + "?pipe_pipeline_id=" + id;
+        console.log("query", query);
+        fetch(query)
+            .then((response) => response.json())
+            .then(pipeline => {
+
+                console.log('pipeline', pipeline);
+                if (pipeline.geometry) {
+                    Draw.deleteAll();
+                    Draw.add(pipeline.geometry);
+                }
+            })
+    }
+
     let currentPipeline = null;
-    function queryPipeGeometryFromAPI(pipe_number, pipe_segment_number, r, grid_type, fromLoc,toLoc) {
+    function queryPipeGeometryFromAPI(pipe_number, pipe_segment_number, r, grid_type, fromLoc, toLoc) {
         Draw.deleteAll();
 
         const query = apiUrl + "?pipe_number=" + pipe_number + "&pipe_segment_number=" + pipe_segment_number;
@@ -950,32 +894,32 @@
                     const from_qtr_unit = fromLoc.charAt(0);
 
                     let from_geom;
-                    if (from_qtr_unit === 'A'){
-                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90),0.225,180);
+                    if (from_qtr_unit === 'A') {
+                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90), 0.225, 180);
                     }
-                    else if (from_qtr_unit === 'B'){
-                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270),0.225,180);
+                    else if (from_qtr_unit === 'B') {
+                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270), 0.225, 180);
                     }
-                    else if (from_qtr_unit === 'C'){
-                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270),0.225,0);
+                    else if (from_qtr_unit === 'C') {
+                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270), 0.225, 0);
                     }
-                    else if (from_qtr_unit === 'D'){
-                      from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90),0.225,0);
+                    else if (from_qtr_unit === 'D') {
+                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90), 0.225, 0);
                     }
 
                     const to_qtr_unit = toLoc.charAt(0);
                     let to_geom;
-                    if (to_qtr_unit === 'A'){
-                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90),0.225,180);
+                    if (to_qtr_unit === 'A') {
+                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90), 0.225, 180);
                     }
-                    else if (to_qtr_unit === 'B'){
-                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270),0.225,180);
+                    else if (to_qtr_unit === 'B') {
+                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270), 0.225, 180);
                     }
-                    else if (to_qtr_unit === 'C'){
-                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270),0.225,0);
+                    else if (to_qtr_unit === 'C') {
+                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270), 0.225, 0);
                     }
-                    else if (to_qtr_unit === 'D'){
-                      to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90),0.225,0);
+                    else if (to_qtr_unit === 'D') {
+                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90), 0.225, 0);
                     }
 
                     const s1 = createSquare(from_geom, r / 1000 / 2);
@@ -1094,7 +1038,7 @@
         data.slice(start, end).forEach((i) => {
             // console.log('i',i);
             const id = `${i["Project #"]}_${i["Segment #"]}`;
-            table += `<tr class="line">
+            table += `<tr class="line" id="">
                         <td class="gotPipe"  id="green_${id}"></td>
                         <td class="pipe"
                             lineid="${i["Project #"]}"
@@ -1112,8 +1056,6 @@
                             <div class="pipeLength" id="pipe_${id}"> </div>
                             <div><b>From</b>: ${i.info["From"]}</div>
                             <div><b>To</b>:${i.info["To"]}</div>
-
-
                         </td>
                         <td>
                             <button class="btn saveData" id="b_${id}" onclick="saveData(${i["Project #"]}, ${i["Segment #"]})" style="visibility:hidden;"><i class="fa fa-save"></i></button>
@@ -1157,11 +1099,8 @@
             return;
         }
 
-        if (filters.number > 0 && filters.segment > 0) {
-            openModal(saveDataToDB);
-        } else {
-            console.warn("No data to save");
-        }
+        openModal(saveDataToDB);
+
     }
 
     function saveDataToDB() {
@@ -1169,6 +1108,8 @@
 
         const { score, note, additionalData } = arguments[0];
         const { number, segment } = filters;
+
+
 
         console.log(score, note, number, segment);
         //get drawn data
@@ -1196,7 +1137,7 @@
             body: new URLSearchParams({
                 score,
                 note,
-                insert_pipe: number,
+                insert_pipe: selectedId, //global
                 pipe_segment_number: segment,
                 pipe_geojson: JSON.stringify(collection),
                 additional_pipe_ids: JSON.stringify(additionalData)
@@ -1206,21 +1147,31 @@
             .then((response) => {
                 if (response.ok) {
                     console.log("the call works ok", response);
-                }
-                toast("Geometry saved");
-                goToNext();
-                calcColors(); //racalculate colors aftes saving data
 
-                //update color
-                console.log('',);
-                document.getElementById(`green_${number}_${segment}`).style.backgroundColor = 'green'
+                    toast("Geometry saved");
+
+
+                    //update color
+                    const e = document.getElementById(`green_${selectedId}`)
+                    e.style.backgroundColor = 'green'
+                    e.setAttribute("done", "true");
+
+                    calcColors(goToNext); //racalculate colors aftes saving data
+
+
+                    //clear all prev lines 
+                    Draw.deleteAll()
+                    const collextion = turf.featureCollection([])
+                    map.getSource("squares").setData(collection);
+                }
+
+
             })
             .catch(function (error) {
                 console.log("Request failed", error);
             });
 
-
-        getIsTiledInMapbox();//redraw the isTiledInMapbox() layer
+        // getIsTiledInMapbox();//redraw the isTiledInMapbox() layer
     }
 
     function findFirstEmptyIndex(currentPage) {
@@ -1236,197 +1187,45 @@
     }
 
     function goToNext() {
-        console.log("filters", filters);
-        console.log("currentPage", currentPage);
 
-        let next;
-        const current = currentPage.findIndex(
-            (i) => +i.number === +filters.number && +i.segment === +filters.segment
-        );
-        currentPage[current].done = true;
+        const index = arrayData.findIndex(s => s['Pipeline ID'] === selectedId);
+        const next = arrayData.find((i, key) => i.done === false && key > index);
+        document.querySelector(`td[lineid="${next['Pipeline ID']}"]`).click()
 
-        for (let index = current; index < currentPage.length; index++) {
-            console.log("curren[index]", currentPage[index]);
-            console.log("[index]", index);
-            const element = currentPage[index];
-            if (!element.done) {
-                next = index;
-                break;
-            }
-        }
-
-        console.log("(next + 1) >= currentPage.length", current + 1, currentPage.length);
-
-        if (current + 1 >= currentPage.length) {
-            const page = pagination.getCurrentPage();
-
-            console.log("pagination._getLastPage() <= page + 1", pagination._getLastPage(), page + 1);
-            if (pagination._getLastPage() > page + 1) {
-                console.log("!!!!!!!!!!!!!!!!!!!!");
-
-                document.querySelector(".right").scrollTo(0, 0);
-                pagination.movePageTo(page + 1); //go to next page
-
-                setTimeout(() => {
-                    const index = findFirstEmptyIndex(currentPage);
-                    const nextEl = currentPage[index];
-                    document.querySelector(`td[lineid="${nextEl.number}"][segment="${nextEl.segment}"]`).click(); //click first element
-                }, 500);
-                //goToNext();
-                return;
-            }
-        }
-
-        console.log("next", next);
-        const nextElement = currentPage[next];
-        if (nextElement) {
-            document.querySelector(`td[lineid="${nextElement.number}"][segment="${nextElement.segment}"]`).click();
-        }
     }
 
-    async function calcColors() {
+    async function calcColors(callback) {
         // recalculate color and update map
-
-        const groups = [];
-        const projects = [];
+        console.log('recalculate colors',);
         const query = apiUrl + "?all_pipes";
         await fetch(query)
             .then((i) => i.json())
             .then((json) => {
                 allPipes = json; //global
-                console.log("json", json);
-                const g = [...new Set(json.map((i) => i.group))].sort((a, b) =>
-                    a.localeCompare(b, "en", { numeric: true })
-                );
-                groups.push(...g);
             });
-        console.log("=> groups", groups);
+        const inDB = allPipes.map(i => i.number);
 
-        //update main array with groups from DB
-        arrayData.forEach((i) => {
-            const n = +i["Project #"];
-            const s = +i["Segment #"];
-            const pipe = allPipes.find((d) => +d.number === n && +d.segment === s);
-
-            if (pipe && pipe.group) {
-                i.group = pipe.group;
+        arrayData.forEach(s => {
+            if (inDB.includes(s['Pipeline ID'])) {
+                s.done = true;
             } else {
-                i.group = "empty";
+                s.done = false;
             }
-            if (pipe) {
-                i.completed = pipe.completed;
-                i.geometry = pipe.geometry;
-            }
-        });
+        })
 
-        //print groups selection
-        groups.forEach((i) => {
-            if (i === "") i = "empty";
-
-            const pipesInGroup = _.filter(arrayData, (d) => d.group === i);
-            // console.log('pipesInGroup', pipesInGroup);
-            const pipesInGroupCompleted = _.filter(pipesInGroup, (p) => p.completed);
-            // console.log('pipesInGroupCompleted', pipesInGroupCompleted);
-            const fractionCompleted = pipesInGroupCompleted.length / pipesInGroup.length;
-
-            const option = document.createElement("option");
-            option.text = i + ` (${_.round(fractionCompleted * 100, 1)}%)`;
-            option.value = i;
-            groupsInput.appendChild(option);
-        });
-
-        //calculate colors based on input data from CSV and DB arrays
-        const counter = new Map();
-        arrayData.forEach((i) => {
-            const num = i["Project #"];
-
-            let c = counter.get(num);
-            let done = 0;
-            let all = 0;
-
-            if (!c) {
-                counter.set(num, {
-                    done: 0,
-                    all: 0,
-                });
-            }
-
-            c = counter.get(num);
-            all = c.all + 1;
-
-            if (i.completed) {
-                counter.set(num, {
-                    done: c.done + 1,
-                    all: all,
-                });
+        Array.from(document.getElementsByClassName("gotPipe")).map(i => {
+            const id = i.id.split("_")[1]
+            if (inDB.includes(id)) {
+                i.parentElement.setAttribute("done", "true")
+                i.style.backgroundColor = "green"
             } else {
-                counter.set(num, {
-                    done: c.done,
-                    all: all,
-                });
+                i.parentElement.setAttribute("done", "false")
             }
-        });
+        })
 
-        console.log("counter", counter);
-
-        // const counterJson = new Map();
-        // allPipes.forEach(i => {
-        //     const num = +i.number
-        //     const c = counterJson.get(num)
-        //     if (c) {
-        //         const s = c + 1
-        //         counterJson.set(num, s)
-        //     } else {
-        //         counterJson.set(num, 1)
-        //     }
-        // })
-
-        // const jsonColors = new Map();
-
-        // counter.forEach((value, key) => {
-        //     const d = counterJson.get(key)
-        //     if (d) {
-        //         if (value > d) {
-        //             jsonColors.set(key, 'orange')
-        //         }
-        //         if (value === d) {
-        //             jsonColors.set(key, 'green')
-        //         }
-        //     } else {
-        //         jsonColors.set(key, 'gray')
-        //     }
-        // })
-
-        // console.log('!!!!! counter', counter);
-        // console.log('!!!!! counterJson', counterJson);
-
-        listJson.features.forEach((i) => {
-            const num = +i.properties.PROJECT_NU;
-            const c = counter.get(num);
-            let color = "gray";
-
-            if (c) {
-                if (c.done === 0) {
-                    color = "gray";
-                }
-                if (c.done < c.all && c.done >= 1) {
-                    color = "orange";
-                }
-                if (c.done === c.all) {
-                    color = "green";
-                }
-            }
-            i.properties.color = color;
-        });
-
-        map.getSource("route").setData(listJson);
-
-
-        const finished = allPipes.filter(i => i.completed === true).length
-        const all = allPipes.length
-        const percentDone = ((finished * 100) / all).toFixed(2)
-        allpipesDiv.innerHTML = `<b>${finished.toLocaleString()} / ${all.toLocaleString()} (${percentDone}%)</b>`;
-
+        if (callback) {
+            callback()
+        }
     }
 
     function filterLinesById(id) {
@@ -1495,8 +1294,6 @@
                     project
                 })
             })
-
-
             console.log("Save");
             const score = scoreInput.value;
             const note = noteInput.value;
@@ -1510,27 +1307,6 @@
             modal.style.display = "none";
         };
 
-        //Save AS part
-        const currentId = arrayData.filter(i => +i['Project #'] === +filters.project && +i['Segment #'] === +filters.segment);
-        const saveList = arrayData.filter(i => +i['Project #'] === +filters.project && +i['Segment #'] !== +filters.segment)
-        const savelistDiv = saveList.map(i => {
-            const id = `${i['Project #']}_${i['Segment #']}`;
-            return `<label for="pipe_${id}">
-                    <div class="nowrap">
-                        <input class="additional_data" id="pipe_${id}" segment="${i['Segment #']}" project="${i['Project #']}" type="checkbox">#${i['Segment #']} length: ${i['Length (m)']} m
-                    </div>
-                </label>`
-        })
-        saveAsDiv.innerHTML = `
-                Current #${currentId[0]['Segment #']} - ${currentId[0]['Length (m)']}m
-                ${savelistDiv.join("")}
-               `;
-        // When the user clicks anywhere outside of the modal, close it
-        // window.onclick = function (event) {
-        //     if (event.target == modal) {
-        //         modal.style.display = "none";
-        //     }
-        // }
     }
 </script>
 
