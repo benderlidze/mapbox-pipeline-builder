@@ -195,8 +195,14 @@
         if (state.feature.type === "LineString") {
             const length = turf.length(state.feature, { units: "meters" }).toFixed(3);
             if (lineinfo) {
+
+                const sq = arrayData.find(i => i['Pipeline ID'] === selectedId);
+                const pipeLength = (+sq['Length (km)'] * 1000);
+                let expectedDistance = currentPipeline ? currentPipeline.expectedLength + "m" : pipeLength + "m";
+
                 lineinfo.style.display = "inline";
                 lineinfo.innerHTML = `Total distance ${length}m`;
+                lineinfo.innerHTML = `Total distance: ${length}m / ${expectedDistance}`;
             }
         }
     };
@@ -289,7 +295,11 @@
         const length = turf.length(geojson, { units: "meters" }).toFixed(3);
 
         if (lineinfo) {
-            let expectedDistance = currentPipeline ? currentPipeline.expectedLength + "m" : "???";
+
+            const sq = arrayData.find(i => i['Pipeline ID'] === selectedId);
+            const pipeLength = (+sq['Length (km)'] * 1000);
+
+            let expectedDistance = currentPipeline ? currentPipeline.expectedLength + "m" : pipeLength + "m";
             lineinfo.style.display = "inline";
             lineinfo.innerHTML = `Total distance: ${length}m / ${expectedDistance}`;
         }
@@ -356,8 +366,8 @@
                         <td class="gotPipe" id="green_${id}"></td>
                         <td class="pipe" lineid="${id}"                            >
                             <div> <b>${i["Pipeline ID"]} | ${i["Field"]}</b></div>
-                            <div>${i["Raw From"]} ${i["Raw To"]}</div>
-                            <div><b>Length: ${i["Length (km)"]}km</b></div>
+                            <div><b>From:</b> ${i["Raw From"]} <br><b>To:</b>${i["Raw To"]}</div>
+                            <div><b>Length: ${+i["Length (km)"] * 1000}m</b></div>
                             <div><b>Diameter</b>: ${i["Diameter"]}mm</div>
                         </td>
                         <td>
@@ -844,145 +854,6 @@
     }
 
     let currentPipeline = null;
-    function queryPipeGeometryFromAPI(pipe_number, pipe_segment_number, r, grid_type, fromLoc, toLoc) {
-        Draw.deleteAll();
-
-        const query = apiUrl + "?pipe_number=" + pipe_number + "&pipe_segment_number=" + pipe_segment_number;
-        console.log("query", query);
-        fetch(query)
-            .then((response) => response.json())
-            .then((pipeline) => {
-                const currentPipelineAttributes = _.find(
-                    arrayData,
-                    (i) =>
-                        i["Project #"] === parseInt(pipe_number) && i["Segment #"] === parseInt(pipe_segment_number)
-                );
-                currentPipeline = pipeline;
-                currentPipeline.expectedLength = currentPipelineAttributes["Length (m)"] || 0;
-                // console.log("currentPipeline", currentPipeline);
-
-                if (pipeline.pipe_geojson) {
-                    // const collection = {
-                    //     'type': 'FeatureCollection',
-                    //     'features': [i.pipe_geojson]
-                    // }
-                    Draw.deleteAll();
-                    Draw.add(pipeline.pipe_geojson);
-                }
-
-                if (pipeline.pipe_squares && grid_type === 'DLS') {
-                    const c1 = pipeline.pipe_squares[0][0];
-                    const c2 = pipeline.pipe_squares[0][1];
-
-                    //Hack: Don't want to try fixing square geoms in DB. Just shift them here.
-                    from_geom = turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.090, 270);
-                    to_geom = turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.090, 270);
-
-                    const s1 = createSquare(from_geom, r / 1000 / 2);
-                    const s2 = createSquare(to_geom, r / 1000 / 2);
-                    const collection = turf.featureCollection([s1, s2]);
-                    map.getSource("squares").setData(collection);
-                    const combined = turf.combine(collection);
-                    const bounds = turf.bbox(combined);
-                    map.fitBounds(bounds, { padding: 100 });
-                }
-                else if (pipeline.pipe_squares && grid_type === 'NTS') {
-                    const c1 = pipeline.pipe_squares[0][0];
-                    const c2 = pipeline.pipe_squares[0][1];
-
-                    //Translate Point
-                    const from_qtr_unit = fromLoc.charAt(0);
-
-                    let from_geom;
-                    if (from_qtr_unit === 'A') {
-                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90), 0.225, 180);
-                    }
-                    else if (from_qtr_unit === 'B') {
-                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270), 0.225, 180);
-                    }
-                    else if (from_qtr_unit === 'C') {
-                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.225, 270), 0.225, 0);
-                    }
-                    else if (from_qtr_unit === 'D') {
-                        from_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c2[0], +c2[1]]), 0.070, 90), 0.225, 0);
-                    }
-
-                    const to_qtr_unit = toLoc.charAt(0);
-                    let to_geom;
-                    if (to_qtr_unit === 'A') {
-                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90), 0.225, 180);
-                    }
-                    else if (to_qtr_unit === 'B') {
-                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270), 0.225, 180);
-                    }
-                    else if (to_qtr_unit === 'C') {
-                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.225, 270), 0.225, 0);
-                    }
-                    else if (to_qtr_unit === 'D') {
-                        to_geom = turf.transformTranslate(turf.transformTranslate(turf.point([+c1[0], +c1[1]]), 0.070, 90), 0.225, 0);
-                    }
-
-                    const s1 = createSquare(from_geom, r / 1000 / 2);
-                    const s2 = createSquare(to_geom, r / 1000 / 2);
-                    const collection = turf.featureCollection([s1, s2]);
-                    map.getSource("squares").setData(collection);
-                    const combined = turf.combine(collection);
-                    const bounds = turf.bbox(combined);
-                    map.fitBounds(bounds, { padding: 100 });
-                }
-                else {
-                    //const c = turf.centerOfMass(i.pipe_geojson)
-                    // console.log("i.pipe_geojson", pipeline.pipe_geojson);
-                    if (!pipeline.pipe_geojson) {
-                        toast("Empty geometry! No records in DB");
-                    } else {
-                        const bbox = turf.bbox(pipeline.pipe_geojson);
-                        map.fitBounds(bbox, { padding: 100 });
-                    }
-
-                    // console.log('c.geometry.coordinates', c.geometry.coordinates);
-                    // map.flyTo({
-                    //     center: c.geometry.coordinates,
-                    //     essential: true,
-                    //     zoom: 14
-                    // })
-                }
-
-                filters.number = pipe_number;
-                filters.segment = pipe_segment_number;
-
-                //set the save icon
-                document.querySelectorAll("button.saveData").forEach((i) => (i.style.visibility = "hidden"));
-                const id = "b_" + pipe_number + "_" + pipe_segment_number;
-                // console.log("id", id);
-                const button = document.getElementById(id);
-                button.style.visibility = "visible";
-
-                //set length from DB
-                const pipeId = "pipe_" + pipe_number + "_" + pipe_segment_number;
-                const pipe = document.getElementById(pipeId);
-
-                // console.log("i[0]", pipeline[0]);
-                if (pipeline[0] && pipeline[0].properties) {
-                    const length =
-                        pipeline[0].properties && pipeline[0].properties.length
-                            ? Math.ceil(pipeline[0].properties.length) + "m"
-                            : "none";
-                    pipe.innerHTML = "Pipe length from DB: " + length;
-                }
-            });
-
-        //color code polygon according to the number of rows in DB
-        const queryNumber = apiUrl + "?pipe_number=" + pipe_number;
-        fetch(queryNumber)
-            .then((i) => i.json())
-            .then((i) => {
-                console.log("RESULT ROWS", i);
-                let color = "";
-                const inDB = +i;
-                const all = arrayData.filter((s) => +s["Project #"] === +pipe_number).length;
-            });
-    }
 
     function printPage(start, end, data) {
         console.log("printPage data", data);
